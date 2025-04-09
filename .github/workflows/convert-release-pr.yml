@@ -1,0 +1,91 @@
+name: convert-and-release
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - develop
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  handle-develop-merge:
+    if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'develop' && startsWith(github.event.pull_request.title, 'chore')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout develop
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+
+      - name: Set up Git
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+
+      - name: Reset develop to before merge
+        run: |
+          git fetch origin develop
+          git checkout develop
+          git push origin ${{ github.event.pull_request.merge_commit_sha }}^:develop --force
+      
+      - name: Create PR from develop to main
+        id: create-pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr create \
+            --base main \
+            --head develop \
+            --title "${{ github.event.pull_request.title }}" \
+            --body "${{ github.event.pull_request.body }}"
+          PR_URL=$(gh pr list --head develop --state open --json url -q '.[0].url')
+          echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
+
+      - name: Set up Git
+        run: |
+          git config --global user.name "github-actions2"
+          git config --global user.email "github-actions2@github.com"
+
+      - name: Approve PR
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr review ${{ steps.create-pr.outputs.pr_url }} --approve
+
+  handle-main-merge:
+    if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main' && startsWith(github.event.pull_request.title, 'chore')
+    runs-on: ubuntu-latest
+    needs: handle-develop-merge
+
+    steps:
+      - name: Extract tag from PR title
+        id: extract
+        run: |
+          TITLE="${{ github.event.pull_request.title }}"
+          VERSION=$(echo "$TITLE" | grep -oP 'v\d+\.\d+\.\d+')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Tag develop
+        run: |
+          git fetch origin develop
+          git tag ${{ steps.extract.outputs.version }} origin/develop
+          git push origin ${{ steps.extract.outputs.version }}
+
+      - name: Tag main
+        run: |
+          git fetch origin main
+          git tag -f ${{ steps.extract.outputs.version }} origin/main
+          git push -f origin ${{ steps.extract.outputs.version }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.extract.outputs.version }}
+          generate_release_notes: true
