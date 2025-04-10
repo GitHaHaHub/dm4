@@ -18,7 +18,7 @@ on:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh pr review ${{ steps.create-pr.outputs.pr_url }} --approve
+          gh pr review ${{ github.event.pull_request.number }} --approve
           
       - name: Extract tag from PR title
         id: extract
