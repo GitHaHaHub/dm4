@@ -1,6 +1,8 @@
+name: release
+
 on:
   pull_request:
-    types: [Open]
+    types: [open]
     branches:
       - develop
       - main
